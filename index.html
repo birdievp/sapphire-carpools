@@ -1,0 +1,1412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0118" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="description" content="Split Ubers and Lyfts with fellow SAPPHIRE 2026 attendees in Orlando" />
+<title>SAPPHIRE Carpools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Instrument+Serif&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    background: #0a0118;
+    color: #fff;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+  #root { min-height: 100vh; }
+  button { font-family: inherit; cursor: pointer; border: none; }
+  button:disabled { cursor: not-allowed; }
+  input, textarea, select { font-family: inherit; }
+  a { color: inherit; text-decoration: none; }
+  ::-webkit-scrollbar { display: none; }
+  * { scrollbar-width: none; -ms-overflow-style: none; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  @keyframes slideUp { from { transform: translateY(40px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .pulse { animation: pulse 1.5s ease-in-out infinite; }
+  .slide-up { animation: slideUp 0.3s ease-out; }
+  .fade-in { animation: fadeIn 0.2s ease-out; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.45.4"
+  }
+}
+</script>
+
+<script type="module">
+import React, { useState, useEffect, useCallback } from 'react';
+import { createRoot } from 'react-dom/client';
+import { createClient } from '@supabase/supabase-js';
+
+// ============================================================
+// CONFIG — paste your Supabase credentials here
+// ============================================================
+const SUPABASE_URL = 'https://yriwakncmsngnhpvvuxg.supabase.co/rest/v1/';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlyaXdha25jbXNuZ25ocHZ2dXhnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0Nzg1NDAsImV4cCI6MjA5NDA1NDU0MH0.aJa6BnGyy2bTLlGSOi5tdQqhFSV3kT7w5x_VulhC2t0';
+// ============================================================
+
+// Free email providers to block (we want work emails only for trust)
+const BLOCKED_DOMAINS = [
+  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
+  'aol.com', 'me.com', 'live.com', 'msn.com', 'ymail.com', 'protonmail.com',
+  'proton.me', 'mail.com', 'gmx.com', 'tutanota.com', 'zoho.com',
+  'rediffmail.com', 'inbox.com', 'fastmail.com',
+];
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const h = React.createElement;
+
+// ============================================================
+// Helpers
+// ============================================================
+function getDomain(email) {
+  return email.split('@')[1]?.toLowerCase() || '';
+}
+
+function isValidWorkEmail(email) {
+  const domain = getDomain(email);
+  if (!domain) return false;
+  if (BLOCKED_DOMAINS.includes(domain)) return false;
+  return /^[^@]+@[^@]+\.[^@]+$/.test(email);
+}
+
+function companyFromDomain(domain) {
+  if (!domain) return '';
+  const base = domain.split('.')[0];
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+function formatRideTime(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+  const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (isToday) return `Today · ${t}`;
+  if (isTomorrow) return `Tomorrow · ${t}`;
+  return `${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} · ${t}`;
+}
+
+function timeAgo(iso) {
+  const seconds = Math.floor((new Date() - new Date(iso)) / 1000);
+  if (seconds < 60) return 'just now';
+  const mins = Math.floor(seconds / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function initials(name) {
+  return (name || '?').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
+}
+
+// ============================================================
+// Main App
+// ============================================================
+function App() {
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [needsProfile, setNeedsProfile] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState('feed');
+  const [rides, setRides] = useState([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [selectedRide, setSelectedRide] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [requests, setRequests] = useState([]);
+  const [toast, setToast] = useState(null);
+
+  // Auth bootstrap
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoading(false);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+      setSession(sess);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // Load or create profile after sign-in
+  useEffect(() => {
+    if (!session) { setProfile(null); return; }
+    loadProfile();
+  }, [session]);
+
+  async function loadProfile() {
+    const userId = session.user.id;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (data) {
+      setProfile(data);
+      setNeedsProfile(false);
+    } else {
+      setNeedsProfile(true);
+    }
+  }
+
+  // Load rides + realtime
+  useEffect(() => {
+    if (!profile) return;
+    loadRides();
+    loadMyRequests();
+    const ch = supabase
+      .channel('rides-feed')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, () => loadRides())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ride_requests' }, () => {
+        loadRides();
+        loadMyRequests();
+      })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [profile]);
+
+  async function loadRides() {
+    const { data } = await supabase
+      .from('rides')
+      .select('*, ride_requests(*)')
+      .eq('status', 'open')
+      .gte('departure_time', new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString())
+      .order('departure_time', { ascending: true });
+    if (data) setRides(data);
+  }
+
+  async function loadMyRequests() {
+    if (!profile) return;
+    const { data } = await supabase
+      .from('ride_requests')
+      .select('*, rides(*)')
+      .or(`requester_id.eq.${profile.id},rides.creator_id.eq.${profile.id}`);
+    if (data) setRequests(data);
+  }
+
+  function showToast(msg, type = 'info') {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setProfile(null);
+  }
+
+  if (loading) return h(Splash);
+  if (!session) return h(SignIn, { showToast });
+  if (needsProfile) return h(ProfileSetup, {
+    session,
+    onComplete: (p) => { setProfile(p); setNeedsProfile(false); },
+  });
+  if (!profile) return h(Splash);
+
+  const filtered = filter === 'all'
+    ? rides
+    : filter === 'to_airport'
+    ? rides.filter(r => r.direction === 'to_airport')
+    : filter === 'from_airport'
+    ? rides.filter(r => r.direction === 'from_airport')
+    : rides.filter(r => r.direction === 'custom');
+
+  return h('div', { style: S.app },
+    h(Header, { profile, view, setView, requestCount: requests.filter(r => r.status === 'pending' && rides.find(rd => rd.id === r.ride_id)?.creator_id === profile.id).length, onSignOut: signOut }),
+    view === 'feed' && h(Feed, {
+      rides: filtered,
+      profile,
+      filter,
+      setFilter,
+      onOpenRide: setSelectedRide,
+      onCreate: () => setShowCreate(true),
+    }),
+    view === 'requests' && h(Requests, {
+      requests,
+      profile,
+      rides,
+      onOpenRide: setSelectedRide,
+      showToast,
+      reload: () => { loadRides(); loadMyRequests(); },
+    }),
+    view === 'me' && h(MyRides, {
+      profile,
+      rides,
+      requests,
+      onOpenRide: setSelectedRide,
+      onSignOut: signOut,
+      showToast,
+    }),
+    view === 'feed' && h('button', { style: S.fab, onClick: () => setShowCreate(true), 'aria-label': 'Post a ride' },
+      h('span', { style: { fontSize: 28, fontWeight: 300, lineHeight: 1 } }, '+')
+    ),
+    showCreate && h(CreateRide, {
+      profile,
+      onClose: () => setShowCreate(false),
+      onCreated: () => { setShowCreate(false); loadRides(); showToast('Ride posted! 🎉', 'success'); },
+    }),
+    selectedRide && h(RideDetail, {
+      ride: rides.find(r => r.id === selectedRide.id) || selectedRide,
+      profile,
+      onClose: () => setSelectedRide(null),
+      onAction: () => { loadRides(); loadMyRequests(); },
+      showToast,
+    }),
+    toast && h(Toast, { toast })
+  );
+}
+
+// ============================================================
+// Splash
+// ============================================================
+function Splash() {
+  return h('div', { style: { ...S.app, display: 'flex', alignItems: 'center', justifyContent: 'center' } },
+    h('div', { className: 'pulse', style: { fontSize: 32, fontFamily: 'Instrument Serif, serif', letterSpacing: '-1px' } }, 'Carpools')
+  );
+}
+
+// ============================================================
+// Sign In
+// ============================================================
+function SignIn({ showToast }) {
+  const [email, setEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  async function sendMagicLink() {
+    if (!isValidWorkEmail(email)) {
+      showToast('Please use a work email (no Gmail, Yahoo, etc.)', 'error');
+      return;
+    }
+    setSending(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.origin + window.location.pathname },
+    });
+    setSending(false);
+    if (error) {
+      showToast(error.message, 'error');
+    } else {
+      setSent(true);
+    }
+  }
+
+  return h('div', { style: S.signIn },
+    h('div', { style: S.signInCard, className: 'fade-in' },
+      h('div', { style: S.heroEmoji }, '🚗'),
+      h('h1', { style: S.signInTitle }, 'Carpools'),
+      h('p', { style: S.signInSubtitle }, 'SAPPHIRE 2026 · Orlando'),
+      h('p', { style: S.signInBlurb },
+        'Split Ubers and Lyfts with fellow SAPPHIRE attendees. ',
+        h('br'),
+        'Airport runs, hotel shuttles, anywhere in Orlando.'
+      ),
+      sent
+        ? h('div', { style: S.sentCard, className: 'fade-in' },
+            h('div', { style: { fontSize: 32, marginBottom: 12 } }, '📬'),
+            h('div', { style: S.sentTitle }, 'Check your email'),
+            h('div', { style: S.sentBody }, `We sent a sign-in link to ${email}. Open it on this device to enter.`),
+            h('button', { style: S.linkBtn, onClick: () => setSent(false) }, 'Use a different email')
+          )
+        : h(React.Fragment, null,
+            h('input', {
+              style: S.input,
+              type: 'email',
+              placeholder: 'you@company.com',
+              value: email,
+              onChange: ev => setEmail(ev.target.value),
+              onKeyDown: ev => { if (ev.key === 'Enter') sendMagicLink(); },
+              autoComplete: 'email',
+              autoFocus: true,
+            }),
+            h('button', {
+              style: { ...S.primaryBtn, opacity: (email && !sending) ? 1 : 0.5 },
+              disabled: !email || sending,
+              onClick: sendMagicLink,
+            }, sending ? 'Sending…' : 'Send sign-in link'),
+            h('p', { style: S.fineprint }, 'Work email required. We use this only to verify you\'re a real attendee — no spam, no sharing.')
+          ),
+      h('p', { style: S.disclaimer }, 'Unofficial · Not affiliated with SAP')
+    )
+  );
+}
+
+// ============================================================
+// Profile Setup
+// ============================================================
+function ProfileSetup({ session, onComplete }) {
+  const email = session.user.email;
+  const domain = getDomain(email);
+  const [name, setName] = useState('');
+  const [company, setCompany] = useState(companyFromDomain(domain));
+  const [phone, setPhone] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function save() {
+    if (!name || !company) return;
+    setSaving(true);
+    setError('');
+    const { data, error: err } = await supabase.from('profiles').insert([{
+      id: session.user.id,
+      email,
+      domain,
+      name,
+      company,
+      phone: phone || null,
+    }]).select().single();
+    setSaving(false);
+    if (err) {
+      setError(err.message);
+    } else {
+      onComplete(data);
+    }
+  }
+
+  return h('div', { style: S.signIn },
+    h('div', { style: S.signInCard, className: 'fade-in' },
+      h('div', { style: S.heroEmoji }, '👋'),
+      h('h1', { style: { ...S.signInTitle, fontSize: 30 } }, 'One quick step'),
+      h('p', { style: S.signInBlurb }, `Signed in as ${email}. Tell us who you are so other attendees can recognize you.`),
+      h('input', {
+        style: S.input,
+        placeholder: 'Full name (e.g., Birdie Smith)',
+        value: name,
+        onChange: ev => setName(ev.target.value),
+        autoFocus: true,
+      }),
+      h('input', {
+        style: S.input,
+        placeholder: 'Company',
+        value: company,
+        onChange: ev => setCompany(ev.target.value),
+      }),
+      h('input', {
+        style: S.input,
+        type: 'tel',
+        placeholder: 'Mobile (optional, only shared after match)',
+        value: phone,
+        onChange: ev => setPhone(ev.target.value),
+      }),
+      error && h('div', { style: S.errorBox }, error),
+      h('button', {
+        style: { ...S.primaryBtn, opacity: (name && company && !saving) ? 1 : 0.5 },
+        disabled: !name || !company || saving,
+        onClick: save,
+      }, saving ? 'Saving…' : 'Continue')
+    )
+  );
+}
+
+// ============================================================
+// Header
+// ============================================================
+function Header({ profile, view, setView, requestCount, onSignOut }) {
+  return h('div', { style: S.header },
+    h('div', { style: S.headerRow },
+      h('div', null,
+        h('div', { style: S.headerTitle }, 'Carpools'),
+        h('div', { style: S.headerSub }, 'SAPPHIRE · Orlando')
+      ),
+      h('button', { style: S.avatarBtn, onClick: () => setView('me'), title: profile.name }, initials(profile.name))
+    ),
+    h('div', { style: S.tabs },
+      h('button', {
+        style: { ...S.tab, ...(view === 'feed' ? S.tabActive : {}) },
+        onClick: () => setView('feed'),
+      }, 'All rides'),
+      h('button', {
+        style: { ...S.tab, ...(view === 'requests' ? S.tabActive : {}) },
+        onClick: () => setView('requests'),
+      },
+        'Requests',
+        requestCount > 0 && h('span', { style: S.badge }, requestCount)
+      ),
+      h('button', {
+        style: { ...S.tab, ...(view === 'me' ? S.tabActive : {}) },
+        onClick: () => setView('me'),
+      }, 'My rides')
+    )
+  );
+}
+
+// ============================================================
+// Feed
+// ============================================================
+function Feed({ rides, profile, filter, setFilter, onOpenRide }) {
+  return h('div', null,
+    h('div', { style: S.filterBar },
+      h(FilterChip, { active: filter === 'all', onClick: () => setFilter('all'), label: `All (${rides.length})` }),
+      h(FilterChip, { active: filter === 'from_airport', onClick: () => setFilter('from_airport'), label: '✈️ From MCO' }),
+      h(FilterChip, { active: filter === 'to_airport', onClick: () => setFilter('to_airport'), label: '🛫 To MCO' }),
+      h(FilterChip, { active: filter === 'custom', onClick: () => setFilter('custom'), label: '📍 Other' })
+    ),
+    h('div', { style: S.feed },
+      rides.length === 0
+        ? h(EmptyState, { onPost: () => {} })
+        : rides.map(ride => h(RideCard, {
+            key: ride.id,
+            ride,
+            profile,
+            onClick: () => onOpenRide(ride),
+          }))
+    )
+  );
+}
+
+function FilterChip({ active, onClick, label }) {
+  return h('button', {
+    style: { ...S.chip, ...(active ? S.chipActive : {}) },
+    onClick,
+  }, label);
+}
+
+// ============================================================
+// Ride Card
+// ============================================================
+function RideCard({ ride, profile, onClick }) {
+  const isMine = ride.creator_id === profile.id;
+  const myRequest = (ride.ride_requests || []).find(r => r.requester_id === profile.id);
+  const approvedCount = (ride.ride_requests || []).filter(r => r.status === 'approved').length;
+  const spotsLeft = ride.total_seats - approvedCount - 1; // -1 for creator
+  const isFull = spotsLeft <= 0;
+  const directionLabel = ride.direction === 'from_airport' ? '✈️ From MCO' : ride.direction === 'to_airport' ? '🛫 To MCO' : '📍 Custom';
+  const accentColor = ride.direction === 'from_airport' ? '#4cc9f0' : ride.direction === 'to_airport' ? '#ff6b9d' : '#c77dff';
+
+  let statusBadge = null;
+  if (isMine) statusBadge = h('div', { style: { ...S.statusBadge, background: '#43aa8b', color: '#000' } }, 'YOURS');
+  else if (myRequest?.status === 'approved') statusBadge = h('div', { style: { ...S.statusBadge, background: '#43aa8b', color: '#000' } }, 'MATCHED ✓');
+  else if (myRequest?.status === 'pending') statusBadge = h('div', { style: { ...S.statusBadge, background: '#f4a261', color: '#000' } }, 'PENDING');
+  else if (myRequest?.status === 'declined') statusBadge = h('div', { style: { ...S.statusBadge, background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' } }, 'DECLINED');
+  else if (isFull) statusBadge = h('div', { style: { ...S.statusBadge, background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' } }, 'FULL');
+
+  return h('div', { style: { ...S.card, opacity: (myRequest?.status === 'declined' || (isFull && !isMine && !myRequest)) ? 0.55 : 1 }, onClick },
+    h('div', { style: { ...S.cardAccent, background: accentColor } }),
+    h('div', { style: S.cardHead },
+      h('div', { style: S.cardDirection }, directionLabel),
+      statusBadge
+    ),
+    h('div', { style: S.routeRow },
+      h('div', { style: S.routePoint }, h('div', { style: S.routeDot }), h('div', { style: S.routeText }, ride.origin)),
+      h('div', { style: S.routeLine }),
+      h('div', { style: S.routePoint }, h('div', { style: { ...S.routeDot, background: accentColor } }), h('div', { style: S.routeText }, ride.destination))
+    ),
+    h('div', { style: S.cardMeta },
+      h('div', { style: S.metaItem }, '🕐 ', formatRideTime(ride.departure_time)),
+      h('div', { style: S.metaItem }, '👥 ', `${approvedCount + 1}/${ride.total_seats}`, spotsLeft > 0 && spotsLeft <= 2 && h('span', { style: { color: '#f4a261', marginLeft: 4 } }, `· ${spotsLeft} left`))
+    ),
+    ride.notes && h('div', { style: S.cardNotes }, ride.notes),
+    h('div', { style: S.cardFooter },
+      h('div', { style: S.hostInfo },
+        h('div', { style: S.smallAvatar }, initials(ride.creator_name)),
+        h('div', null,
+          h('div', { style: S.hostName }, ride.creator_name),
+          h('div', { style: S.hostCompany }, ride.creator_company)
+        )
+      ),
+      h('div', { style: S.tapHint }, 'Tap →')
+    )
+  );
+}
+
+// ============================================================
+// Create Ride
+// ============================================================
+function CreateRide({ profile, onClose, onCreated }) {
+  const [direction, setDirection] = useState('from_airport');
+  const [origin, setOrigin] = useState('');
+  const [destination, setDestination] = useState('');
+  const [departureTime, setDepartureTime] = useState('');
+  const [totalSeats, setTotalSeats] = useState(4);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  // Smart defaults when direction changes
+  useEffect(() => {
+    if (direction === 'from_airport') {
+      setOrigin('MCO (Orlando International)');
+      setDestination('');
+    } else if (direction === 'to_airport') {
+      setOrigin('');
+      setDestination('MCO (Orlando International)');
+    } else {
+      setOrigin('');
+      setDestination('');
+    }
+  }, [direction]);
+
+  const canSubmit = origin && destination && departureTime && totalSeats > 1 && !saving;
+
+  async function submit() {
+    setSaving(true);
+    setError('');
+    const { error: err } = await supabase.from('rides').insert([{
+      creator_id: profile.id,
+      creator_name: profile.name,
+      creator_company: profile.company,
+      direction,
+      origin,
+      destination,
+      departure_time: new Date(departureTime).toISOString(),
+      total_seats: parseInt(totalSeats),
+      notes: notes || null,
+      status: 'open',
+    }]);
+    setSaving(false);
+    if (err) setError(err.message);
+    else onCreated();
+  }
+
+  return h('div', { style: S.modalOverlay, onClick: onClose },
+    h('div', { style: S.modalSheet, className: 'slide-up', onClick: ev => ev.stopPropagation() },
+      h('button', { style: S.closeBtn, onClick: onClose }, '✕'),
+      h('h2', { style: S.modalTitle }, 'Post a ride'),
+      h('p', { style: S.modalSub }, 'Other attendees can request to join. You approve who rides with you.'),
+
+      h('div', { style: S.fieldLabel }, 'Direction'),
+      h('div', { style: S.directionGrid },
+        h('button', {
+          style: { ...S.directionBtn, ...(direction === 'from_airport' ? S.directionBtnActive : {}), borderColor: direction === 'from_airport' ? '#4cc9f0' : 'rgba(255,255,255,0.1)' },
+          onClick: () => setDirection('from_airport'),
+        },
+          h('div', { style: { fontSize: 22 } }, '✈️'),
+          h('div', { style: S.directionLabel }, 'From MCO')
+        ),
+        h('button', {
+          style: { ...S.directionBtn, ...(direction === 'to_airport' ? S.directionBtnActive : {}), borderColor: direction === 'to_airport' ? '#ff6b9d' : 'rgba(255,255,255,0.1)' },
+          onClick: () => setDirection('to_airport'),
+        },
+          h('div', { style: { fontSize: 22 } }, '🛫'),
+          h('div', { style: S.directionLabel }, 'To MCO')
+        ),
+        h('button', {
+          style: { ...S.directionBtn, ...(direction === 'custom' ? S.directionBtnActive : {}), borderColor: direction === 'custom' ? '#c77dff' : 'rgba(255,255,255,0.1)' },
+          onClick: () => setDirection('custom'),
+        },
+          h('div', { style: { fontSize: 22 } }, '📍'),
+          h('div', { style: S.directionLabel }, 'Other')
+        )
+      ),
+
+      h('div', { style: S.fieldLabel }, 'From'),
+      h('input', {
+        style: S.input,
+        placeholder: direction === 'from_airport' ? 'MCO (Orlando International)' : 'e.g., Hilton Orlando Bonnet Creek',
+        value: origin,
+        onChange: ev => setOrigin(ev.target.value),
+      }),
+
+      h('div', { style: S.fieldLabel }, 'To'),
+      h('input', {
+        style: S.input,
+        placeholder: direction === 'to_airport' ? 'MCO (Orlando International)' : (direction === 'custom' ? 'e.g., Magic Kingdom, Eddie V\'s, ICON Park' : 'e.g., Hilton Orlando, OCCC, Rosen Plaza'),
+        value: destination,
+        onChange: ev => setDestination(ev.target.value),
+      }),
+
+      h('div', { style: S.fieldLabel }, 'Departure time'),
+      h('input', {
+        style: S.input,
+        type: 'datetime-local',
+        value: departureTime,
+        onChange: ev => setDepartureTime(ev.target.value),
+      }),
+
+      h('div', { style: S.fieldLabel }, 'Total seats in the car'),
+      h('div', { style: S.seatRow },
+        [2, 3, 4, 5, 6].map(n => h('button', {
+          key: n,
+          style: { ...S.seatBtn, ...(totalSeats === n ? S.seatBtnActive : {}) },
+          onClick: () => setTotalSeats(n),
+        }, n))
+      ),
+      h('p', { style: S.fineprintInline }, `You + ${totalSeats - 1} other${totalSeats - 1 === 1 ? '' : 's'}`),
+
+      h('div', { style: S.fieldLabel }, 'Notes (optional)'),
+      h('textarea', {
+        style: { ...S.input, minHeight: 70, resize: 'vertical', padding: '12px 16px' },
+        placeholder: 'e.g., "Splitting Uber XL, Venmo @birdie", "Have 2 large suitcases", "Flexible on time"',
+        value: notes,
+        onChange: ev => setNotes(ev.target.value),
+      }),
+
+      error && h('div', { style: S.errorBox }, error),
+
+      h('button', {
+        style: { ...S.primaryBtn, opacity: canSubmit ? 1 : 0.5, marginTop: 16 },
+        disabled: !canSubmit,
+        onClick: submit,
+      }, saving ? 'Posting…' : 'Post ride')
+    )
+  );
+}
+
+// ============================================================
+// Ride Detail
+// ============================================================
+function RideDetail({ ride, profile, onClose, onAction, showToast }) {
+  const [requesting, setRequesting] = useState(false);
+  const isMine = ride.creator_id === profile.id;
+  const requests = ride.ride_requests || [];
+  const myRequest = requests.find(r => r.requester_id === profile.id);
+  const approved = requests.filter(r => r.status === 'approved');
+  const pending = requests.filter(r => r.status === 'pending');
+  const spotsLeft = ride.total_seats - approved.length - 1;
+  const accentColor = ride.direction === 'from_airport' ? '#4cc9f0' : ride.direction === 'to_airport' ? '#ff6b9d' : '#c77dff';
+
+  async function requestJoin() {
+    setRequesting(true);
+    const { error } = await supabase.from('ride_requests').insert([{
+      ride_id: ride.id,
+      requester_id: profile.id,
+      requester_name: profile.name,
+      requester_company: profile.company,
+      requester_email: profile.email,
+      requester_phone: profile.phone,
+      status: 'pending',
+    }]);
+    setRequesting(false);
+    if (error) showToast(error.message, 'error');
+    else { showToast('Request sent! The host will be notified.', 'success'); onAction(); }
+  }
+
+  async function cancelRequest() {
+    const { error } = await supabase.from('ride_requests').delete().eq('id', myRequest.id);
+    if (error) showToast(error.message, 'error');
+    else { showToast('Request cancelled', 'info'); onAction(); }
+  }
+
+  async function respondToRequest(reqId, newStatus) {
+    const { error } = await supabase.from('ride_requests').update({ status: newStatus }).eq('id', reqId);
+    if (error) showToast(error.message, 'error');
+    else { showToast(newStatus === 'approved' ? 'Approved ✓' : 'Declined', newStatus === 'approved' ? 'success' : 'info'); onAction(); }
+  }
+
+  async function cancelRide() {
+    if (!confirm('Cancel this ride? All approved riders will see it disappear.')) return;
+    const { error } = await supabase.from('rides').update({ status: 'cancelled' }).eq('id', ride.id);
+    if (error) showToast(error.message, 'error');
+    else { showToast('Ride cancelled', 'info'); onClose(); onAction(); }
+  }
+
+  function copyShareLink() {
+    const url = `${window.location.origin}${window.location.pathname}?ride=${ride.id}`;
+    navigator.clipboard.writeText(url).then(() => showToast('Link copied!', 'success'));
+  }
+
+  return h('div', { style: S.detailOverlay, onClick: onClose },
+    h('div', { style: S.detailSheet, className: 'slide-up', onClick: ev => ev.stopPropagation() },
+      h('button', { style: S.closeBtn, onClick: onClose }, '✕'),
+      h('div', { style: { ...S.detailHero, background: `linear-gradient(135deg, ${accentColor} 0%, #0a0118 130%)` } },
+        h('div', { style: S.detailDir }, ride.direction === 'from_airport' ? '✈️ FROM AIRPORT' : ride.direction === 'to_airport' ? '🛫 TO AIRPORT' : '📍 CUSTOM ROUTE'),
+        h('div', { style: S.detailRoute },
+          h('div', { style: S.detailRoutePoint },
+            h('div', { style: S.detailRouteDot }),
+            h('div', { style: S.detailRouteText }, ride.origin)
+          ),
+          h('div', { style: S.detailRouteLine }),
+          h('div', { style: S.detailRoutePoint },
+            h('div', { style: { ...S.detailRouteDot, background: '#fff' } }),
+            h('div', { style: S.detailRouteText }, ride.destination)
+          )
+        )
+      ),
+      h('div', { style: S.detailBody },
+        h('div', { style: S.detailMetaBox },
+          h('div', { style: S.detailMetaRow },
+            h('span', { style: S.metaKey }, 'Departure'),
+            h('span', { style: S.metaVal }, formatRideTime(ride.departure_time))
+          ),
+          h('div', { style: S.detailMetaRow },
+            h('span', { style: S.metaKey }, 'Seats'),
+            h('span', { style: S.metaVal }, `${approved.length + 1}/${ride.total_seats}`, spotsLeft > 0 && h('span', { style: { color: accentColor, marginLeft: 6 } }, `${spotsLeft} open`))
+          ),
+          h('div', { style: S.detailMetaRow },
+            h('span', { style: S.metaKey }, 'Posted by'),
+            h('span', { style: S.metaVal }, ride.creator_name, ' · ', ride.creator_company)
+          ),
+          h('div', { style: S.detailMetaRow },
+            h('span', { style: S.metaKey }, 'Posted'),
+            h('span', { style: S.metaVal }, timeAgo(ride.created_at))
+          )
+        ),
+
+        ride.notes && h('div', { style: S.notesBox },
+          h('div', { style: S.notesLabel }, 'Notes from host'),
+          h('div', { style: S.notesText }, ride.notes)
+        ),
+
+        // Action area
+        !isMine && !myRequest && spotsLeft > 0 && h('button', {
+          style: { ...S.bigBtn, background: accentColor, color: '#000' },
+          onClick: requestJoin,
+          disabled: requesting,
+        }, requesting ? 'Sending…' : 'Request to join'),
+
+        !isMine && myRequest?.status === 'pending' && h(React.Fragment, null,
+          h('div', { style: { ...S.statusCard, background: 'rgba(244, 162, 97, 0.15)', borderColor: '#f4a261' } },
+            h('div', { style: { fontSize: 24, marginBottom: 8 } }, '⏳'),
+            h('div', { style: S.statusCardTitle }, 'Request pending'),
+            h('div', { style: S.statusCardBody }, `${ride.creator_name} will see your request and approve or decline. You'll see their contact info once approved.`)
+          ),
+          h('button', { style: { ...S.bigBtn, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.2)' }, onClick: cancelRequest }, 'Cancel request')
+        ),
+
+        !isMine && myRequest?.status === 'approved' && h(React.Fragment, null,
+          h('div', { style: { ...S.statusCard, background: 'rgba(67, 170, 139, 0.15)', borderColor: '#43aa8b' } },
+            h('div', { style: { fontSize: 24, marginBottom: 8 } }, '✓'),
+            h('div', { style: S.statusCardTitle }, 'You\'re in!'),
+            h('div', { style: S.statusCardBody }, `Contact ${ride.creator_name} to coordinate pickup:`),
+            h('div', { style: S.contactRow },
+              h('a', { href: `mailto:${ride.creator_email}`, style: S.contactPill }, '📧 ', ride.creator_email)
+            ),
+            ride.creator_phone && h('div', { style: S.contactRow },
+              h('a', { href: `tel:${ride.creator_phone}`, style: S.contactPill }, '📱 ', ride.creator_phone),
+              h('a', { href: `sms:${ride.creator_phone}`, style: S.contactPill }, '💬 Text')
+            )
+          )
+        ),
+
+        !isMine && myRequest?.status === 'declined' && h('div', { style: { ...S.statusCard, background: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)' } },
+          h('div', { style: S.statusCardTitle }, 'Request declined'),
+          h('div', { style: S.statusCardBody }, `The host declined this request. Check the feed for other rides.`)
+        ),
+
+        !isMine && !myRequest && spotsLeft <= 0 && h('div', { style: { ...S.statusCard, background: 'rgba(255,255,255,0.05)' } },
+          h('div', { style: S.statusCardTitle }, 'This ride is full'),
+          h('div', { style: S.statusCardBody }, 'Check the feed for other rides going your way.')
+        ),
+
+        // Host view: pending requests
+        isMine && pending.length > 0 && h('div', { style: { marginTop: 20 } },
+          h('h3', { style: S.sectionHead }, `Pending requests (${pending.length})`),
+          pending.map(req => h('div', { key: req.id, style: S.requestCard },
+            h('div', { style: S.requestHeader },
+              h('div', { style: S.smallAvatar }, initials(req.requester_name)),
+              h('div', { style: { flex: 1 } },
+                h('div', { style: S.hostName }, req.requester_name),
+                h('div', { style: S.hostCompany }, req.requester_company)
+              )
+            ),
+            h('div', { style: S.requestActions },
+              h('button', {
+                style: { ...S.smallBtn, background: '#43aa8b', color: '#000', flex: 1 },
+                onClick: () => respondToRequest(req.id, 'approved'),
+              }, 'Approve'),
+              h('button', {
+                style: { ...S.smallBtn, background: 'rgba(255,255,255,0.08)', color: '#fff', flex: 1 },
+                onClick: () => respondToRequest(req.id, 'declined'),
+              }, 'Decline')
+            )
+          ))
+        ),
+
+        // Host view: approved riders
+        isMine && approved.length > 0 && h('div', { style: { marginTop: 20 } },
+          h('h3', { style: S.sectionHead }, `Approved riders (${approved.length})`),
+          approved.map(req => h('div', { key: req.id, style: S.requestCard },
+            h('div', { style: S.requestHeader },
+              h('div', { style: S.smallAvatar }, initials(req.requester_name)),
+              h('div', { style: { flex: 1 } },
+                h('div', { style: S.hostName }, req.requester_name),
+                h('div', { style: S.hostCompany }, req.requester_company)
+              )
+            ),
+            h('div', { style: { ...S.contactRow, marginTop: 8 } },
+              h('a', { href: `mailto:${req.requester_email}`, style: S.contactPill }, '📧 Email'),
+              req.requester_phone && h('a', { href: `sms:${req.requester_phone}`, style: S.contactPill }, '💬 Text')
+            )
+          ))
+        ),
+
+        // Host actions
+        isMine && h(React.Fragment, null,
+          h('button', { style: { ...S.bigBtn, background: 'rgba(255,255,255,0.06)', marginTop: 20 }, onClick: copyShareLink }, '🔗 Copy share link'),
+          h('button', { style: { ...S.bigBtn, background: 'transparent', color: '#ff6b9d', border: '1.5px solid rgba(255, 107, 157, 0.3)' }, onClick: cancelRide }, 'Cancel ride')
+        ),
+
+        !isMine && h('button', { style: { ...S.bigBtn, background: 'rgba(255,255,255,0.06)', marginTop: 16 }, onClick: copyShareLink }, '🔗 Share this ride')
+      )
+    )
+  );
+}
+
+// ============================================================
+// Requests view
+// ============================================================
+function Requests({ requests, profile, rides, onOpenRide, showToast, reload }) {
+  const myRequests = requests.filter(r => r.requester_id === profile.id);
+  const incomingRequests = requests.filter(r => {
+    const ride = rides.find(rd => rd.id === r.ride_id);
+    return ride?.creator_id === profile.id && r.status === 'pending';
+  });
+
+  async function respond(reqId, newStatus) {
+    const { error } = await supabase.from('ride_requests').update({ status: newStatus }).eq('id', reqId);
+    if (error) showToast(error.message, 'error');
+    else { showToast(newStatus === 'approved' ? 'Approved ✓' : 'Declined', 'success'); reload(); }
+  }
+
+  return h('div', { style: S.feed },
+    incomingRequests.length > 0 && h('div', null,
+      h('h3', { style: S.sectionHeadTop }, `Incoming requests (${incomingRequests.length})`),
+      incomingRequests.map(req => {
+        const ride = rides.find(r => r.id === req.ride_id);
+        if (!ride) return null;
+        return h('div', { key: req.id, style: S.card },
+          h('div', { style: { ...S.cardAccent, background: '#f4a261' } }),
+          h('div', { style: S.cardHead },
+            h('div', { style: S.cardDirection }, 'WANTS TO JOIN YOUR RIDE')
+          ),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
+            h('div', { style: S.smallAvatar }, initials(req.requester_name)),
+            h('div', null,
+              h('div', { style: { ...S.hostName, fontSize: 15 } }, req.requester_name),
+              h('div', { style: S.hostCompany }, req.requester_company)
+            )
+          ),
+          h('div', { style: { ...S.cardNotes, marginBottom: 12 } },
+            `→ ${ride.origin} to ${ride.destination} · ${formatRideTime(ride.departure_time)}`
+          ),
+          h('div', { style: { display: 'flex', gap: 8 } },
+            h('button', { style: { ...S.smallBtn, background: '#43aa8b', color: '#000', flex: 1 }, onClick: (e) => { e.stopPropagation(); respond(req.id, 'approved'); } }, 'Approve'),
+            h('button', { style: { ...S.smallBtn, background: 'rgba(255,255,255,0.08)', color: '#fff', flex: 1 }, onClick: (e) => { e.stopPropagation(); respond(req.id, 'declined'); } }, 'Decline')
+          )
+        );
+      })
+    ),
+    myRequests.length > 0 && h('div', { style: { marginTop: incomingRequests.length > 0 ? 24 : 0 } },
+      h('h3', { style: S.sectionHeadTop }, 'Your requests'),
+      myRequests.map(req => {
+        const ride = rides.find(r => r.id === req.ride_id) || req.rides;
+        if (!ride) return null;
+        const statusColor = req.status === 'approved' ? '#43aa8b' : req.status === 'pending' ? '#f4a261' : 'rgba(255,255,255,0.3)';
+        const statusLabel = req.status === 'approved' ? 'MATCHED ✓' : req.status === 'pending' ? 'PENDING' : 'DECLINED';
+        return h('div', { key: req.id, style: { ...S.card, opacity: req.status === 'declined' ? 0.6 : 1 }, onClick: () => onOpenRide(ride) },
+          h('div', { style: { ...S.cardAccent, background: statusColor } }),
+          h('div', { style: S.cardHead },
+            h('div', { style: S.cardDirection }, ride.direction === 'from_airport' ? '✈️ From MCO' : ride.direction === 'to_airport' ? '🛫 To MCO' : '📍 Custom'),
+            h('div', { style: { ...S.statusBadge, background: statusColor, color: '#000' } }, statusLabel)
+          ),
+          h('div', { style: S.routeRow },
+            h('div', { style: S.routePoint }, h('div', { style: S.routeDot }), h('div', { style: S.routeText }, ride.origin)),
+            h('div', { style: S.routeLine }),
+            h('div', { style: S.routePoint }, h('div', { style: { ...S.routeDot, background: statusColor } }), h('div', { style: S.routeText }, ride.destination))
+          ),
+          h('div', { style: S.cardMeta },
+            h('div', { style: S.metaItem }, '🕐 ', formatRideTime(ride.departure_time))
+          )
+        );
+      })
+    ),
+    incomingRequests.length === 0 && myRequests.length === 0 && h('div', { style: S.empty },
+      h('div', { style: S.emptyMark }, '✦'),
+      h('h3', { style: S.emptyTitle }, 'No requests yet'),
+      h('p', { style: S.emptyText }, 'When someone requests to join your ride, or you request to join someone else\'s, it\'ll show up here.')
+    )
+  );
+}
+
+// ============================================================
+// My Rides view
+// ============================================================
+function MyRides({ profile, rides, requests, onOpenRide, onSignOut }) {
+  const myPostedRides = rides.filter(r => r.creator_id === profile.id);
+  const matchedRides = requests
+    .filter(r => r.requester_id === profile.id && r.status === 'approved')
+    .map(r => rides.find(rd => rd.id === r.ride_id))
+    .filter(Boolean);
+
+  return h('div', { style: S.feed },
+    h('div', { style: S.profileBox },
+      h('div', { style: { ...S.avatarBtn, width: 56, height: 56, fontSize: 18 } }, initials(profile.name)),
+      h('div', { style: { flex: 1 } },
+        h('div', { style: { fontSize: 18, fontWeight: 700 } }, profile.name),
+        h('div', { style: { fontSize: 13, color: 'rgba(255,255,255,0.6)' } }, profile.company),
+        h('div', { style: { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 } }, profile.email)
+      )
+    ),
+
+    matchedRides.length > 0 && h('div', null,
+      h('h3', { style: S.sectionHeadTop }, `Rides you joined (${matchedRides.length})`),
+      matchedRides.map(ride => h(RideCard, { key: ride.id, ride, profile, onClick: () => onOpenRide(ride) }))
+    ),
+
+    h('h3', { style: { ...S.sectionHeadTop, marginTop: matchedRides.length > 0 ? 24 : 12 } }, `Rides you posted (${myPostedRides.length})`),
+    myPostedRides.length === 0
+      ? h('div', { style: { ...S.empty, padding: '32px 24px' } },
+          h('p', { style: S.emptyText }, 'You haven\'t posted any rides yet. Tap the + button on the feed to share one.')
+        )
+      : myPostedRides.map(ride => h(RideCard, { key: ride.id, ride, profile, onClick: () => onOpenRide(ride) })),
+
+    h('button', { style: { ...S.bigBtn, background: 'transparent', border: '1.5px solid rgba(255,255,255,0.15)', marginTop: 24 }, onClick: onSignOut }, 'Sign out')
+  );
+}
+
+// ============================================================
+// Misc components
+// ============================================================
+function EmptyState() {
+  return h('div', { style: S.empty },
+    h('div', { style: S.emptyMark }, '🚗'),
+    h('h3', { style: S.emptyTitle }, 'No rides yet'),
+    h('p', { style: S.emptyText }, 'Be the first to post one. Tap the + button below to share your ride to MCO, your hotel, Disney, or anywhere in Orlando.')
+  );
+}
+
+function Toast({ toast }) {
+  const bg = toast.type === 'success' ? '#43aa8b' : toast.type === 'error' ? '#ff6b9d' : '#fff';
+  const color = '#000';
+  return h('div', { style: { ...S.toast, background: bg, color }, className: 'slide-up' }, toast.msg);
+}
+
+// ============================================================
+// Styles
+// ============================================================
+const S = {
+  app: {
+    minHeight: '100vh',
+    background: 'radial-gradient(ellipse at top, #1a0033 0%, #0a0118 50%, #000 100%)',
+    color: '#fff',
+    paddingBottom: 120,
+    maxWidth: 520,
+    margin: '0 auto',
+    position: 'relative',
+  },
+  signIn: {
+    minHeight: '100vh',
+    background: 'radial-gradient(ellipse at center, #2a0052 0%, #0a0118 60%, #000 100%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '24px 20px',
+  },
+  signInCard: { width: '100%', maxWidth: 380, textAlign: 'center' },
+  heroEmoji: { fontSize: 56, marginBottom: 16 },
+  signInTitle: {
+    fontSize: 44, fontWeight: 900, margin: 0,
+    letterSpacing: '-2px',
+    fontFamily: 'Instrument Serif, serif',
+    fontStyle: 'italic',
+    background: 'linear-gradient(135deg, #fff 0%, #c77dff 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    lineHeight: 1,
+  },
+  signInSubtitle: {
+    color: 'rgba(255,255,255,0.5)', fontSize: 12, marginTop: 6,
+    letterSpacing: '2.5px', textTransform: 'uppercase', fontWeight: 600,
+  },
+  signInBlurb: {
+    color: 'rgba(255,255,255,0.7)', fontSize: 15, lineHeight: 1.55,
+    margin: '28px 0 28px',
+  },
+  input: {
+    width: '100%',
+    background: 'rgba(255,255,255,0.04)',
+    border: '1.5px solid rgba(255,255,255,0.1)',
+    color: '#fff',
+    padding: '14px 16px',
+    borderRadius: 12,
+    fontSize: 15,
+    marginBottom: 10,
+    outline: 'none',
+    transition: 'border-color 0.15s',
+  },
+  primaryBtn: {
+    width: '100%',
+    background: 'linear-gradient(135deg, #ff3e88 0%, #c77dff 100%)',
+    color: '#000', border: 'none',
+    padding: '15px', borderRadius: 12,
+    fontSize: 15, fontWeight: 700,
+    marginTop: 6, letterSpacing: '0.3px',
+    transition: 'transform 0.1s',
+  },
+  fineprint: {
+    color: 'rgba(255,255,255,0.4)', fontSize: 12,
+    marginTop: 14, lineHeight: 1.5,
+  },
+  fineprintInline: {
+    color: 'rgba(255,255,255,0.4)', fontSize: 11,
+    marginTop: 6,
+  },
+  disclaimer: {
+    color: 'rgba(255,255,255,0.3)', fontSize: 10,
+    marginTop: 28, letterSpacing: '1.5px', textTransform: 'uppercase',
+  },
+  sentCard: {
+    background: 'rgba(199, 125, 255, 0.08)',
+    border: '1px solid rgba(199, 125, 255, 0.2)',
+    borderRadius: 16, padding: 24,
+  },
+  sentTitle: { fontSize: 18, fontWeight: 700, marginBottom: 8 },
+  sentBody: { fontSize: 14, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5, marginBottom: 16 },
+  linkBtn: {
+    background: 'transparent', color: '#c77dff',
+    fontSize: 13, fontWeight: 600, padding: 8,
+    textDecoration: 'underline',
+  },
+  errorBox: {
+    background: 'rgba(255, 62, 136, 0.15)',
+    border: '1px solid rgba(255, 62, 136, 0.3)',
+    borderRadius: 10, padding: 12,
+    fontSize: 13, color: '#ffb3cc',
+    marginBottom: 12,
+  },
+  header: { padding: '20px 20px 0' },
+  headerRow: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 16,
+  },
+  headerTitle: {
+    fontSize: 28, fontWeight: 900,
+    letterSpacing: '-1px',
+    fontFamily: 'Instrument Serif, serif', fontStyle: 'italic',
+  },
+  headerSub: {
+    fontSize: 10, color: 'rgba(255,255,255,0.4)',
+    letterSpacing: '2px', textTransform: 'uppercase', fontWeight: 600,
+    marginTop: 2,
+  },
+  avatarBtn: {
+    width: 40, height: 40,
+    background: 'linear-gradient(135deg, #ff3e88 0%, #c77dff 100%)',
+    color: '#000', borderRadius: '50%', border: 'none',
+    fontWeight: 800, fontSize: 13,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  tabs: {
+    display: 'flex', gap: 4,
+    borderBottom: '1px solid rgba(255,255,255,0.06)',
+    paddingBottom: 0,
+  },
+  tab: {
+    background: 'transparent', color: 'rgba(255,255,255,0.5)',
+    padding: '10px 14px', fontSize: 13, fontWeight: 600,
+    borderBottom: '2px solid transparent',
+    marginBottom: -1, display: 'flex', alignItems: 'center', gap: 6,
+  },
+  tabActive: { color: '#fff', borderBottom: '2px solid #c77dff' },
+  badge: {
+    background: '#f4a261', color: '#000',
+    fontSize: 10, fontWeight: 800,
+    padding: '2px 7px', borderRadius: 10,
+  },
+  filterBar: {
+    display: 'flex', gap: 8,
+    padding: '14px 20px 8px',
+    overflowX: 'auto',
+  },
+  chip: {
+    background: 'transparent', color: 'rgba(255,255,255,0.7)',
+    border: '1.5px solid rgba(255,255,255,0.12)',
+    padding: '7px 13px', borderRadius: 100,
+    fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+  },
+  chipActive: { background: '#fff', color: '#000', borderColor: '#fff' },
+  feed: { padding: '4px 16px 20px' },
+  card: {
+    position: 'relative',
+    background: 'rgba(255,255,255,0.04)',
+    backdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 18, padding: '16px 16px 14px 20px',
+    marginBottom: 12, overflow: 'hidden',
+    transition: 'transform 0.15s ease, border-color 0.15s ease',
+  },
+  cardAccent: {
+    position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
+  },
+  cardHead: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 12,
+  },
+  cardDirection: {
+    fontSize: 10, fontWeight: 800, letterSpacing: '1.8px',
+    color: 'rgba(255,255,255,0.55)', textTransform: 'uppercase',
+  },
+  statusBadge: {
+    fontSize: 9, fontWeight: 800, letterSpacing: '1.5px',
+    padding: '3px 8px', borderRadius: 4,
+  },
+  routeRow: { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 },
+  routePoint: { display: 'flex', alignItems: 'center', gap: 10 },
+  routeDot: {
+    width: 8, height: 8, borderRadius: '50%',
+    background: 'rgba(255,255,255,0.5)', flexShrink: 0,
+  },
+  routeLine: {
+    width: 1, height: 12, background: 'rgba(255,255,255,0.2)',
+    marginLeft: 3.5,
+  },
+  routeText: { fontSize: 14, fontWeight: 500, lineHeight: 1.3 },
+  cardMeta: {
+    display: 'flex', gap: 16, marginBottom: 10,
+    color: 'rgba(255,255,255,0.65)', fontSize: 13,
+  },
+  metaItem: { display: 'flex', alignItems: 'center', gap: 4 },
+  cardNotes: {
+    fontSize: 13, color: 'rgba(255,255,255,0.6)',
+    background: 'rgba(255,255,255,0.03)',
+    borderLeft: '2px solid rgba(255,255,255,0.15)',
+    padding: '8px 12px', borderRadius: 4,
+    marginBottom: 12, lineHeight: 1.4,
+  },
+  cardFooter: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.06)',
+  },
+  hostInfo: { display: 'flex', alignItems: 'center', gap: 10 },
+  smallAvatar: {
+    width: 32, height: 32, borderRadius: '50%',
+    background: 'linear-gradient(135deg, #ff3e88, #c77dff)',
+    color: '#000', fontWeight: 800, fontSize: 11,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  },
+  hostName: { fontSize: 13, fontWeight: 600 },
+  hostCompany: { fontSize: 11, color: 'rgba(255,255,255,0.5)' },
+  tapHint: { fontSize: 11, color: 'rgba(255,255,255,0.35)', fontWeight: 600 },
+  fab: {
+    position: 'fixed', bottom: 24, left: '50%',
+    transform: 'translateX(-50%)',
+    width: 60, height: 60,
+    background: 'linear-gradient(135deg, #ff3e88 0%, #c77dff 100%)',
+    color: '#000', borderRadius: '50%',
+    boxShadow: '0 12px 40px rgba(255, 62, 136, 0.45), 0 0 0 1px rgba(255,255,255,0.1) inset',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 50,
+  },
+  modalOverlay: {
+    position: 'fixed', inset: 0,
+    background: 'rgba(0,0,0,0.75)',
+    backdropFilter: 'blur(8px)',
+    zIndex: 100,
+    display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+  },
+  modalSheet: {
+    width: '100%', maxWidth: 520, maxHeight: '92vh', overflowY: 'auto',
+    background: 'linear-gradient(180deg, #1a0033 0%, #0a0118 100%)',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: '24px 20px 40px',
+    position: 'relative',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderBottom: 'none',
+  },
+  modalTitle: {
+    fontSize: 26, fontWeight: 900, margin: '4px 0 4px',
+    letterSpacing: '-0.8px',
+    fontFamily: 'Instrument Serif, serif', fontStyle: 'italic',
+  },
+  modalSub: {
+    fontSize: 13, color: 'rgba(255,255,255,0.55)',
+    marginBottom: 20, lineHeight: 1.5,
+  },
+  closeBtn: {
+    position: 'absolute', top: 14, right: 14,
+    width: 36, height: 36,
+    background: 'rgba(255,255,255,0.06)',
+    borderRadius: '50%', color: '#fff',
+    fontSize: 16, display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+    zIndex: 10,
+  },
+  fieldLabel: {
+    fontSize: 11, fontWeight: 800, letterSpacing: '1.5px',
+    textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)',
+    marginTop: 14, marginBottom: 8,
+  },
+  directionGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+    marginBottom: 4,
+  },
+  directionBtn: {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1.5px solid rgba(255,255,255,0.1)',
+    color: '#fff', padding: '12px 8px',
+    borderRadius: 12, display: 'flex',
+    flexDirection: 'column', alignItems: 'center', gap: 4,
+    transition: 'all 0.15s',
+  },
+  directionBtnActive: {
+    background: 'rgba(199, 125, 255, 0.1)',
+  },
+  directionLabel: { fontSize: 11, fontWeight: 700, letterSpacing: '0.3px' },
+  seatRow: { display: 'flex', gap: 8 },
+  seatBtn: {
+    flex: 1,
+    background: 'rgba(255,255,255,0.04)',
+    border: '1.5px solid rgba(255,255,255,0.1)',
+    color: '#fff', padding: '10px',
+    borderRadius: 10, fontSize: 15, fontWeight: 700,
+  },
+  seatBtnActive: {
+    background: '#c77dff', color: '#000', borderColor: '#c77dff',
+  },
+  detailOverlay: {
+    position: 'fixed', inset: 0,
+    background: 'rgba(0,0,0,0.85)',
+    backdropFilter: 'blur(10px)',
+    zIndex: 200,
+    display: 'flex', justifyContent: 'center', alignItems: 'flex-end',
+  },
+  detailSheet: {
+    width: '100%', maxWidth: 520, maxHeight: '95vh', overflowY: 'auto',
+    background: '#0a0118',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    position: 'relative',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderBottom: 'none',
+  },
+  detailHero: {
+    padding: '52px 24px 32px',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+  },
+  detailDir: {
+    fontSize: 10, fontWeight: 800, letterSpacing: '2.5px',
+    color: 'rgba(0,0,0,0.65)', marginBottom: 18,
+  },
+  detailRoute: { display: 'flex', flexDirection: 'column', gap: 6 },
+  detailRoutePoint: { display: 'flex', alignItems: 'center', gap: 12 },
+  detailRouteDot: {
+    width: 12, height: 12, borderRadius: '50%',
+    background: 'rgba(0,0,0,0.4)',
+    border: '2px solid rgba(0,0,0,0.6)', flexShrink: 0,
+  },
+  detailRouteLine: {
+    width: 2, height: 20, background: 'rgba(0,0,0,0.3)',
+    marginLeft: 5,
+  },
+  detailRouteText: {
+    fontSize: 18, fontWeight: 700, color: '#000',
+    letterSpacing: '-0.3px', lineHeight: 1.25,
+  },
+  detailBody: { padding: '24px 20px 40px' },
+  detailMetaBox: {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 14, padding: 16, marginBottom: 14,
+  },
+  detailMetaRow: {
+    display: 'flex', justifyContent: 'space-between',
+    padding: '6px 0', fontSize: 14,
+  },
+  metaKey: { color: 'rgba(255,255,255,0.5)', fontSize: 13 },
+  metaVal: { fontWeight: 600, textAlign: 'right' },
+  notesBox: {
+    background: 'rgba(199, 125, 255, 0.08)',
+    border: '1px solid rgba(199, 125, 255, 0.15)',
+    borderRadius: 14, padding: 14, marginBottom: 14,
+  },
+  notesLabel: {
+    fontSize: 10, fontWeight: 800, letterSpacing: '1.5px',
+    color: '#c77dff', textTransform: 'uppercase', marginBottom: 6,
+  },
+  notesText: { fontSize: 14, lineHeight: 1.5, color: 'rgba(255,255,255,0.9)' },
+  bigBtn: {
+    width: '100%', padding: '14px', borderRadius: 12,
+    fontSize: 15, fontWeight: 700,
+    marginTop: 10, color: '#fff', background: 'rgba(255,255,255,0.06)',
+  },
+  smallBtn: {
+    padding: '10px 14px', borderRadius: 10,
+    fontSize: 13, fontWeight: 700,
+  },
+  statusCard: {
+    border: '1.5px solid', borderRadius: 14, padding: 18,
+    marginTop: 12, marginBottom: 12,
+  },
+  statusCardTitle: { fontSize: 16, fontWeight: 700, marginBottom: 6 },
+  statusCardBody: {
+    fontSize: 13, color: 'rgba(255,255,255,0.7)',
+    lineHeight: 1.5, marginBottom: 10,
+  },
+  contactRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 },
+  contactPill: {
+    background: 'rgba(255,255,255,0.08)', color: '#fff',
+    padding: '8px 12px', borderRadius: 100,
+    fontSize: 12, fontWeight: 600,
+    textDecoration: 'none',
+  },
+  sectionHead: {
+    fontSize: 11, fontWeight: 800, letterSpacing: '2px',
+    textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)',
+    marginBottom: 10, marginTop: 16,
+  },
+  sectionHeadTop: {
+    fontSize: 11, fontWeight: 800, letterSpacing: '2px',
+    textTransform: 'uppercase', color: 'rgba(255,255,255,0.5)',
+    marginBottom: 10, marginTop: 8, padding: '0 4px',
+  },
+  requestCard: {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 12, padding: 14, marginBottom: 8,
+  },
+  requestHeader: {
+    display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
+  },
+  requestActions: { display: 'flex', gap: 8 },
+  profileBox: {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    borderRadius: 16, padding: 16, marginBottom: 16,
+    display: 'flex', alignItems: 'center', gap: 14,
+  },
+  uberBtn: {
+    display: 'block', width: '100%', boxSizing: 'border-box',
+    background: '#000', color: '#fff',
+    border: '1.5px solid #fff', padding: '14px',
+    borderRadius: 12, fontSize: 14, fontWeight: 700,
+    textAlign: 'center', textDecoration: 'none', marginTop: 8,
+  },
+  empty: { padding: '60px 24px', textAlign: 'center' },
+  emptyMark: {
+    fontSize: 48,
+    background: 'linear-gradient(135deg, #ff3e88, #c77dff)',
+    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+    marginBottom: 16,
+  },
+  emptyTitle: { fontSize: 18, fontWeight: 700, marginBottom: 8 },
+  emptyText: {
+    color: 'rgba(255,255,255,0.5)', fontSize: 14,
+    lineHeight: 1.55, maxWidth: 280, margin: '0 auto',
+  },
+  toast: {
+    position: 'fixed', bottom: 100, left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '12px 20px', borderRadius: 100,
+    fontSize: 13, fontWeight: 700,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+    zIndex: 300, maxWidth: '90%',
+  },
+};
+
+// ============================================================
+// Boot
+// ============================================================
+createRoot(document.getElementById('root')).render(h(App));
+
+</script>
+</body>
+</html>
