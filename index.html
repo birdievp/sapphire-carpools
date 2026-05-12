@@ -62,22 +62,7 @@ const SUPABASE_URL = 'https://yriwakncmsngnhpvvuxg.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlyaXdha25jbXNuZ25ocHZ2dXhnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0Nzg1NDAsImV4cCI6MjA5NDA1NDU0MH0.aJa6BnGyy2bTLlGSOi5tdQqhFSV3kT7w5x_VulhC2t0';
 // ============================================================
 
-// Free email providers to block (we want work emails only for trust)
-const BLOCKED_DOMAINS = [
-  'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com',
-  'aol.com', 'me.com', 'live.com', 'msn.com', 'ymail.com', 'protonmail.com',
-  'proton.me', 'mail.com', 'gmx.com', 'tutanota.com', 'zoho.com',
-  'rediffmail.com', 'inbox.com', 'fastmail.com',
-];
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    detectSessionInUrl: true,
-    persistSession: true,
-    autoRefreshToken: true,
-    flowType: 'pkce'
-  }
-});
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const h = React.createElement;
 
 // ============================================================
@@ -87,10 +72,9 @@ function getDomain(email) {
   return email.split('@')[1]?.toLowerCase() || '';
 }
 
-function isValidWorkEmail(email) {
+function isValidEmail(email) {
   const domain = getDomain(email);
   if (!domain) return false;
-  if (BLOCKED_DOMAINS.includes(domain)) return false;
   return /^[^@]+@[^@]+\.[^@]+$/.test(email);
 }
 
@@ -300,8 +284,8 @@ function SignIn({ showToast }) {
   const [sent, setSent] = useState(false);
 
   async function sendMagicLink() {
-    if (!isValidWorkEmail(email)) {
-      showToast('Please use a work email (no Gmail, Yahoo, etc.)', 'error');
+    if (!isValidEmail(email)) {
+      showToast('Please enter a valid email address', 'error');
       return;
     }
     setSending(true);
@@ -329,16 +313,27 @@ function SignIn({ showToast }) {
       ),
       sent
         ? h('div', { style: S.sentCard, className: 'fade-in' },
-            h('div', { style: { fontSize: 32, marginBottom: 12 } }, '📬'),
+            h('div', { style: { fontSize: 40, marginBottom: 12 } }, '📬'),
             h('div', { style: S.sentTitle }, 'Check your email'),
-            h('div', { style: S.sentBody }, `We sent a sign-in link to ${email}. Open it on this device to enter.`),
+            h('div', { style: S.sentBody }, `We sent a sign-in link to `, h('strong', { style: { color: '#fff' } }, email), `.`),
+            h('div', { style: S.spamWarning },
+              h('div', { style: { fontWeight: 700, marginBottom: 6, color: '#f4a261' } }, '⚠️ Not seeing it?'),
+              h('div', { style: { fontSize: 13, lineHeight: 1.5, color: 'rgba(255,255,255,0.8)' } },
+                'Check your ',
+                h('strong', null, 'spam / junk folder'),
+                ' — magic-link emails from new senders often land there. The email is from ',
+                h('strong', null, 'noreply@sapphirecarpools.us'),
+                '.'
+              )
+            ),
+            h('div', { style: { ...S.sentBody, marginTop: 14, fontSize: 13 } }, 'Open the link on this device to sign in. Link expires in 1 hour.'),
             h('button', { style: S.linkBtn, onClick: () => setSent(false) }, 'Use a different email')
           )
         : h(React.Fragment, null,
             h('input', {
               style: S.input,
               type: 'email',
-              placeholder: 'you@company.com',
+              placeholder: 'you@email.com',
               value: email,
               onChange: ev => setEmail(ev.target.value),
               onKeyDown: ev => { if (ev.key === 'Enter') sendMagicLink(); },
@@ -350,7 +345,7 @@ function SignIn({ showToast }) {
               disabled: !email || sending,
               onClick: sendMagicLink,
             }, sending ? 'Sending…' : 'Send sign-in link'),
-            h('p', { style: S.fineprint }, 'Work email required. We use this only to verify you\'re a real attendee — no spam, no sharing.')
+            h('p', { style: S.fineprint }, 'We\'ll email you a magic link. No password, no spam.')
           ),
       h('p', { style: S.disclaimer }, 'Unofficial · Not affiliated with SAP')
     )
@@ -1068,6 +1063,14 @@ const S = {
   },
   sentTitle: { fontSize: 18, fontWeight: 700, marginBottom: 8 },
   sentBody: { fontSize: 14, color: 'rgba(255,255,255,0.7)', lineHeight: 1.5, marginBottom: 16 },
+  spamWarning: {
+    background: 'rgba(244, 162, 97, 0.1)',
+    border: '1px solid rgba(244, 162, 97, 0.3)',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 4,
+    textAlign: 'left',
+  },
   linkBtn: {
     background: 'transparent', color: '#c77dff',
     fontSize: 13, fontWeight: 600, padding: 8,
