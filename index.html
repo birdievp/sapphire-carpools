@@ -282,6 +282,9 @@ function SignIn({ showToast }) {
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [showCodeEntry, setShowCodeEntry] = useState(false);
+  const [code, setCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
 
   async function sendMagicLink() {
     if (!isValidEmail(email)) {
@@ -301,6 +304,25 @@ function SignIn({ showToast }) {
     }
   }
 
+  async function verifyCode() {
+    const trimmedCode = code.replace(/\s/g, '');
+    if (!trimmedCode || trimmedCode.length < 6) {
+      showToast('Enter the 6-digit code from your email', 'error');
+      return;
+    }
+    setVerifying(true);
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: trimmedCode,
+      type: 'email',
+    });
+    setVerifying(false);
+    if (error) {
+      showToast(error.message || 'Invalid or expired code', 'error');
+    }
+    // On success, the auth state change listener in App takes over.
+  }
+
   return h('div', { style: S.signIn },
     h('div', { style: S.signInCard, className: 'fade-in' },
       h('div', { style: S.heroEmoji }, '🚗'),
@@ -312,23 +334,53 @@ function SignIn({ showToast }) {
         'Airport runs, hotel shuttles, anywhere in Orlando.'
       ),
       sent
-        ? h('div', { style: S.sentCard, className: 'fade-in' },
-            h('div', { style: { fontSize: 40, marginBottom: 12 } }, '📬'),
-            h('div', { style: S.sentTitle }, 'Check your email'),
-            h('div', { style: S.sentBody }, `We sent a sign-in link to `, h('strong', { style: { color: '#fff' } }, email), `.`),
-            h('div', { style: S.spamWarning },
-              h('div', { style: { fontWeight: 700, marginBottom: 6, color: '#f4a261' } }, '⚠️ Not seeing it?'),
-              h('div', { style: { fontSize: 13, lineHeight: 1.5, color: 'rgba(255,255,255,0.8)' } },
-                'Check your ',
-                h('strong', null, 'spam / junk folder'),
-                ' — magic-link emails from new senders often land there. The email is from ',
-                h('strong', null, 'noreply@sapphirecarpools.us'),
-                '.'
-              )
-            ),
-            h('div', { style: { ...S.sentBody, marginTop: 14, fontSize: 13 } }, 'Open the link on this device to sign in. Link expires in 1 hour.'),
-            h('button', { style: S.linkBtn, onClick: () => setSent(false) }, 'Use a different email')
-          )
+        ? showCodeEntry
+          // ----- CODE ENTRY VIEW -----
+          ? h('div', { style: S.sentCard, className: 'fade-in' },
+              h('div', { style: { fontSize: 32, marginBottom: 12 } }, '🔑'),
+              h('div', { style: S.sentTitle }, 'Enter your 6-digit code'),
+              h('div', { style: S.sentBody }, 'Find the code in the email we sent to ', h('strong', { style: { color: '#fff' } }, email), '.'),
+              h('input', {
+                style: { ...S.input, textAlign: 'center', fontSize: 24, letterSpacing: 8, fontFamily: 'SF Mono, Monaco, monospace', fontWeight: 700 },
+                type: 'text',
+                inputMode: 'numeric',
+                placeholder: '••••••',
+                maxLength: 6,
+                value: code,
+                onChange: ev => setCode(ev.target.value.replace(/[^0-9]/g, '')),
+                onKeyDown: ev => { if (ev.key === 'Enter') verifyCode(); },
+                autoFocus: true,
+              }),
+              h('button', {
+                style: { ...S.primaryBtn, opacity: (code.length === 6 && !verifying) ? 1 : 0.5 },
+                disabled: code.length !== 6 || verifying,
+                onClick: verifyCode,
+              }, verifying ? 'Verifying…' : 'Sign in'),
+              h('button', { style: { ...S.linkBtn, marginTop: 10 }, onClick: () => { setShowCodeEntry(false); setCode(''); } }, '← Back')
+            )
+          // ----- POST-SEND CONFIRMATION VIEW -----
+          : h('div', { style: S.sentCard, className: 'fade-in' },
+              h('div', { style: { fontSize: 40, marginBottom: 12 } }, '📬'),
+              h('div', { style: S.sentTitle }, 'Check your email'),
+              h('div', { style: S.sentBody }, `We sent a sign-in link to `, h('strong', { style: { color: '#fff' } }, email), `.`),
+              h('div', { style: S.spamWarning },
+                h('div', { style: { fontWeight: 700, marginBottom: 6, color: '#f4a261' } }, '⚠️ Not seeing it?'),
+                h('div', { style: { fontSize: 13, lineHeight: 1.5, color: 'rgba(255,255,255,0.8)' } },
+                  'Check your ',
+                  h('strong', null, 'spam / junk folder'),
+                  ' — magic-link emails from new senders often land there. The email is from ',
+                  h('strong', null, 'noreply@sapphirecarpools.us'),
+                  '.'
+                )
+              ),
+              h('div', { style: { ...S.sentBody, marginTop: 14, fontSize: 13 } }, 'The email has both a link AND a 6-digit code. If the link doesn\'t work, use the code below.'),
+              h('button', {
+                style: { ...S.primaryBtn, marginTop: 8 },
+                onClick: () => setShowCodeEntry(true),
+              }, 'Use a code instead →'),
+              h('button', { style: { ...S.linkBtn, marginTop: 12 }, onClick: () => { setSent(false); setEmail(''); } }, 'Use a different email')
+            )
+        // ----- EMAIL ENTRY VIEW -----
         : h(React.Fragment, null,
             h('input', {
               style: S.input,
