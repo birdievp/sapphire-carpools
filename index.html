@@ -70,7 +70,14 @@ const BLOCKED_DOMAINS = [
   'rediffmail.com', 'inbox.com', 'fastmail.com',
 ];
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    detectSessionInUrl: true,
+    persistSession: true,
+    autoRefreshToken: true,
+    flowType: 'pkce'
+  }
+});
 const h = React.createElement;
 
 // ============================================================
